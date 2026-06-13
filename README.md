@@ -61,19 +61,31 @@ pip install -r dss_backend/requirements.txt
 Run the API:
 
 ```bash
-uvicorn dss_backend.main:app --reload
+uvicorn dss_backend.main:app --reload --port 8001
 ```
 
 The backend will be available at:
 
 ```text
-http://localhost:8000
+http://localhost:8001
+```
+
+Port `8000` is often already used by other local services. This README uses `8001` for the DSS backend. If `8001` is also taken, choose another port:
+
+```bash
+uvicorn dss_backend.main:app --reload --port 8010
+```
+
+When using a custom port, pass the matching WebSocket URL to the test client:
+
+```bash
+DSS_WS_URL=ws://localhost:8010/dss/ws/vehicles python dss_backend/test_client.py
 ```
 
 Open generated FastAPI docs:
 
 ```text
-http://localhost:8000/docs
+http://localhost:8001/docs
 ```
 
 Run the sample WebSocket client in another terminal:
@@ -136,7 +148,7 @@ Connection arguments:
 Connection URL:
 
 ```text
-ws://localhost:8000/dss/ws/vehicles
+ws://localhost:8001/dss/ws/vehicles
 ```
 
 Supported `message_type` values:
@@ -567,7 +579,7 @@ Status codes:
 Example request:
 
 ```bash
-curl http://localhost:8000/dss/health
+curl http://localhost:8001/dss/health
 ```
 
 Example response:
@@ -619,7 +631,7 @@ This includes both vehicle state and event state:
 Example request:
 
 ```bash
-curl http://localhost:8000/dss/state
+curl http://localhost:8001/dss/state
 ```
 
 Example initial response:
@@ -704,7 +716,7 @@ Status codes:
 Example request:
 
 ```bash
-curl http://localhost:8000/dss/vehicles
+curl http://localhost:8001/dss/vehicles
 ```
 
 Example response after `air_1` sends heartbeat and telemetry:
@@ -769,7 +781,7 @@ Status codes:
 Example request:
 
 ```bash
-curl http://localhost:8000/dss/vehicles/air_1
+curl http://localhost:8001/dss/vehicles/air_1
 ```
 
 Example response for a known vehicle that has not sent any messages yet:
@@ -820,7 +832,7 @@ Status codes:
 Example request:
 
 ```bash
-curl http://localhost:8000/dss/events
+curl http://localhost:8001/dss/events
 ```
 
 Example initial response:
@@ -862,7 +874,7 @@ Example response after an event:
 The included client connects to:
 
 ```text
-ws://localhost:8000/dss/ws/vehicles
+ws://localhost:8001/dss/ws/vehicles
 ```
 
 It sends:
@@ -886,7 +898,7 @@ Expected output:
 Then inspect state:
 
 ```bash
-curl http://localhost:8000/dss/vehicles/air_1
+curl http://localhost:8001/dss/vehicles/air_1
 ```
 
 ## API Reference

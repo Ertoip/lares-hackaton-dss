@@ -1,10 +1,11 @@
 import asyncio
 import json
+import os
 
 import websockets
 
 
-WS_URL = "ws://localhost:8000/dss/ws/vehicles"
+WS_URL = os.getenv("DSS_WS_URL", "ws://localhost:8001/dss/ws/vehicles")
 
 
 async def main() -> None:

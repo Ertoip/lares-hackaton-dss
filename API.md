@@ -18,7 +18,7 @@ Vehicles are not modeled as an internal simulation. From the DSS perspective, th
 ## Base URL
 
 ```text
-http://localhost:8000
+http://localhost:8001
 ```
 
 ## Allowed Vehicles
@@ -366,7 +366,7 @@ pip install -r dss_backend/requirements.txt
 Run the backend:
 
 ```bash
-uvicorn dss_backend.main:app --reload
+uvicorn dss_backend.main:app --reload --port 8001
 ```
 
 Run the sample WebSocket client:
