@@ -180,6 +180,75 @@ For every incoming WebSocket message, the backend performs this flow:
 8. Recalculate link status when relevant
 9. Send an acknowledgement back through the WebSocket
 
+## Common WebSocket Arguments
+
+These arguments appear in every incoming vehicle message.
+
+| Argument | Type | Required | Allowed Values or Validation | Meaning |
+| --- | --- | --- | --- | --- |
+| `message_type` | string | Yes | `heartbeat`, `telemetry`, `event`, `link_state` | Tells the DSS how to validate and route the message |
+| `vehicle_id` | string | Yes | `air_1`, `air_2`, `surface_1`, `surface_2`, `sub_1`, `sub_2` | Identifies which external vehicle sent the message |
+| `timestamp` | ISO 8601 datetime string | Yes | Example: `2026-01-01T12:00:00Z` | Vehicle-provided event time for the message |
+| `domain` | string | Yes | `air`, `surface`, `subsurface` | Vehicle domain; must match the configured domain for `vehicle_id` |
+
+Important distinction:
+
+| Timestamp | Source | Used For |
+| --- | --- | --- |
+| `timestamp` | Vehicle message | Records when the vehicle says the message was produced |
+| `last_heartbeat_received_at` | DSS server clock | Used by the DSS to derive link status from actual receive time |
+
+## Shared Nested Arguments
+
+These objects are reused by several message types.
+
+### `position`
+
+| Argument | Type | Required | Validation | Meaning |
+| --- | --- | --- | --- | --- |
+| `lat` | number | Yes | `-90` to `90` | Latitude in decimal degrees |
+| `lon` | number | Yes | `-180` to `180` | Longitude in decimal degrees |
+| `alt` | number or null | No | Any number | Altitude, mainly used by air vehicles |
+| `depth` | number or null | No | `>= 0` | Depth below surface, mainly used by subsurface vehicles |
+
+### `velocity`
+
+| Argument | Type | Required | Validation | Meaning |
+| --- | --- | --- | --- | --- |
+| `speed_mps` | number | Yes | `>= 0` | Vehicle speed in meters per second |
+| `heading_deg` | number | Yes | `0 <= heading_deg < 360` | Heading in degrees |
+
+### `battery`
+
+| Argument | Type | Required | Validation | Meaning |
+| --- | --- | --- | --- | --- |
+| `percentage` | number | Yes | `0` to `100` | Current battery percentage |
+| `bingo_threshold` | number | Yes | `0` to `100` | Mission-defined low-battery threshold where the DSS should consider the vehicle near minimum safe reserve |
+
+### `sensors`
+
+| Argument | Type | Required | Allowed Values | Meaning |
+| --- | --- | --- | --- | --- |
+| `camera` | string | Yes | `ok`, `degraded`, `fault`, `unavailable` | Camera availability or health state |
+| `radar` | string | Yes | `ok`, `degraded`, `fault`, `unavailable` | Radar availability or health state |
+| `sonar` | string | Yes | `ok`, `degraded`, `fault`, `unavailable` | Sonar availability or health state |
+
+### `capabilities`
+
+| Argument | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `visual_isr` | boolean | Yes | Whether the vehicle can perform visual intelligence, surveillance, and reconnaissance |
+| `radar_scan` | boolean | Yes | Whether the vehicle can perform radar scanning |
+| `sonar_scan` | boolean | Yes | Whether the vehicle can perform sonar scanning |
+| `relay_comms` | boolean | Yes | Whether the vehicle can act as a communications relay |
+
+### `expected_next_contact_window`
+
+| Argument | Type | Required | Validation | Meaning |
+| --- | --- | --- | --- | --- |
+| `start` | ISO 8601 datetime string | Yes when object is present | Must be before `end` | Start of the next expected contact window |
+| `end` | ISO 8601 datetime string | Yes when object is present | Must be after `start` | End of the next expected contact window |
+
 ## Heartbeat Messages
 
 Heartbeat messages are used to derive whether the vehicle link is `online`, `degraded`, `unstable`, or `lost_link`.
@@ -207,6 +276,20 @@ Required heartbeat intervals:
 | `subsurface` | `30000` |
 
 If an air drone sends `expected_interval_ms = 3000`, the message is rejected because air drones are expected every 1 second.
+
+Heartbeat arguments:
+
+| Argument | Type | Required | Allowed Values or Validation | Meaning | State Effect |
+| --- | --- | --- | --- | --- | --- |
+| `message_type` | string | Yes | Must be `heartbeat` | Identifies this message as a heartbeat | Routes to heartbeat handler |
+| `vehicle_id` | string | Yes | One of the six allowed vehicles | Vehicle that sent the heartbeat | Selects vehicle state entry |
+| `timestamp` | ISO 8601 datetime string | Yes | Valid datetime | Vehicle-provided heartbeat timestamp | Stored as `link.last_heartbeat_at` |
+| `sequence` | integer | Yes | `>= 0` | Monotonic or incrementing heartbeat sequence number from the vehicle | Stored in `last_heartbeat` for debugging |
+| `domain` | string | Yes | Must match `vehicle_id` | Vehicle domain | Stored as `domain` |
+| `communication_mode` | string | Yes | `radio`, `acoustic`, `satellite`, `cellular` | Communication channel used by the vehicle | Stored as `link.communication_mode` |
+| `expected_interval_ms` | integer | Yes | `air=1000`, `surface=3000`, `subsurface=30000` | Expected heartbeat interval for this domain | Stored as `link.expected_interval_ms` and validated |
+
+A heartbeat also stores `link.last_heartbeat_received_at` using the DSS server clock. That receive time is what the backend uses for link degradation calculations.
 
 ## Telemetry Messages
 
@@ -264,6 +347,24 @@ Telemetry updates these fields in the vehicle state:
 
 Telemetry does not by itself prove the link is currently healthy. Link status is primarily based on heartbeat timing and explicit `link_state` messages.
 
+Telemetry arguments:
+
+| Argument | Type | Required | Allowed Values or Validation | Meaning | State Effect |
+| --- | --- | --- | --- | --- | --- |
+| `message_type` | string | Yes | Must be `telemetry` | Identifies this message as telemetry | Routes to telemetry handler |
+| `vehicle_id` | string | Yes | One of the six allowed vehicles | Vehicle that sent telemetry | Selects vehicle state entry |
+| `timestamp` | ISO 8601 datetime string | Yes | Valid datetime | Vehicle-provided telemetry timestamp | Stored inside full `telemetry` snapshot |
+| `domain` | string | Yes | Must match `vehicle_id` | Vehicle domain | Stored as `domain` |
+| `status` | string | Yes | `active`, `idle`, `standby`, `fault`, `returning`, `offline` | Vehicle-reported operating state | Stored as top-level `status` |
+| `position` | object | Yes | See `position` arguments | Last reported geographic position | Stored as top-level `position` |
+| `velocity` | object | Yes | See `velocity` arguments | Last reported movement vector | Stored as top-level `velocity` |
+| `battery` | object | Yes | See `battery` arguments | Battery state and low-battery threshold | Stored as top-level `battery` |
+| `sensors` | object | Yes | See `sensors` arguments | Sensor health or availability | Stored as top-level `sensors` |
+| `capabilities` | object | Yes | See `capabilities` arguments | Capabilities currently advertised by the vehicle | Stored as top-level `capabilities` |
+| `current_task_id` | string or null | No | Any string or null | Task currently assigned to or executed by the vehicle | Stored as `current_task_id` |
+
+Telemetry is stored twice: as the full original `telemetry` snapshot and as extracted top-level fields for easier debugging.
+
 ## Event Messages
 
 Event messages represent notable vehicle-reported observations or alerts.
@@ -296,6 +397,23 @@ Events are stored in the global `events` map by `event_id`.
 
 If another event arrives with the same `event_id`, it overwrites the previous event for now. This is acceptable for the current in-memory debug baseline.
 
+Event arguments:
+
+| Argument | Type | Required | Allowed Values or Validation | Meaning | State Effect |
+| --- | --- | --- | --- | --- | --- |
+| `message_type` | string | Yes | Must be `event` | Identifies this message as an event | Routes to event handler |
+| `event_id` | string | Yes | Non-empty string | Unique event identifier from the vehicle or upstream source | Used as the key in the `events` map |
+| `timestamp` | ISO 8601 datetime string | Yes | Valid datetime | Vehicle-provided time when the event occurred or was reported | Stored in event record |
+| `vehicle_id` | string | Yes | One of the six allowed vehicles | Vehicle that reported the event | Stored in event record |
+| `domain` | string | Yes | Must match `vehicle_id` | Vehicle domain | Stored in event record |
+| `event_kind` | string | Yes | Non-empty string | Machine-readable event category such as `unknown_contact` | Stored in event record |
+| `severity` | string | Yes | `low`, `medium`, `high`, `critical` | Event importance level | Stored in event record |
+| `position` | object or null | No | See `position` arguments | Location associated with the event, if known | Stored in event record |
+| `description` | string | Yes | Non-empty string | Human-readable event description | Stored in event record |
+| `metadata` | object | No | Any JSON object | Extra event-specific fields such as AIS state, contact speed, or classification | Stored in event record |
+
+`metadata` is intentionally flexible because different event kinds may need different supporting data.
+
 ## Link State Messages
 
 Link state messages describe communication context. They are especially important for subsurface vehicles.
@@ -321,6 +439,21 @@ Example expected blackout:
 This tells the DSS that `sub_1` is expected to be silent until its next contact window. Missing heartbeats during that period should not immediately become `lost_link`.
 
 If `status` is `expected_blackout`, `expected_next_contact_window` is required.
+
+Link-state arguments:
+
+| Argument | Type | Required | Allowed Values or Validation | Meaning | State Effect |
+| --- | --- | --- | --- | --- | --- |
+| `message_type` | string | Yes | Must be `link_state` | Identifies this message as a link-state update | Routes to link-state handler |
+| `vehicle_id` | string | Yes | One of the six allowed vehicles | Vehicle whose communication state is being updated | Selects vehicle state entry |
+| `timestamp` | ISO 8601 datetime string | Yes | Valid datetime | Vehicle-provided time for this communication-state update | Stored in `last_link_state` |
+| `domain` | string | Yes | Must match `vehicle_id` | Vehicle domain | Stored as `domain` |
+| `communication_mode` | string | Yes | `radio`, `acoustic`, `satellite`, `cellular` | Communication mode relevant to this link state | Stored as `link.communication_mode` |
+| `status` | string | Yes | `online`, `degraded`, `unstable`, `lost_link`, `expected_blackout`, `late_contact` | Vehicle-reported communication state or expectation | Stored as `link.reported_status`; derived status is stored as `link.status` |
+| `last_contact_at` | ISO 8601 datetime string or null | No | Valid datetime or null | Last time the vehicle says it had contact | Stored as `link.last_contact_at` |
+| `expected_next_contact_window` | object or null | Required when `status=expected_blackout` | See `expected_next_contact_window` arguments | Planned next time window when contact is expected | Stored as `link.expected_next_contact_window` |
+
+For subsurface vehicles, `expected_blackout` prevents normal missing-heartbeat degradation until the contact window has passed.
 
 ## Derived Link Status
 
@@ -368,6 +501,26 @@ Basic health check endpoint.
 
 Use this to confirm the FastAPI process is running.
 
+Endpoint arguments:
+
+| Argument Location | Argument | Type | Required | Meaning |
+| --- | --- | --- | --- | --- |
+| Path | None | N/A | No | This endpoint has no path arguments |
+| Query | None | N/A | No | This endpoint has no query arguments |
+| Body | None | N/A | No | This endpoint does not accept a request body |
+
+Response fields:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `status` | string | Health status of the backend process; currently returns `ok` |
+
+Status codes:
+
+| Status Code | Meaning |
+| --- | --- |
+| `200` | Backend process is running and responded successfully |
+
 Example request:
 
 ```bash
@@ -385,6 +538,31 @@ Example response:
 ## `GET /dss/state`
 
 Returns the complete in-memory DSS debug state.
+
+Endpoint arguments:
+
+| Argument Location | Argument | Type | Required | Meaning |
+| --- | --- | --- | --- | --- |
+| Path | None | N/A | No | This endpoint has no path arguments |
+| Query | None | N/A | No | This endpoint has no query arguments |
+| Body | None | N/A | No | This endpoint does not accept a request body |
+
+Response fields:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `vehicles` | object | Complete vehicle state map keyed by vehicle ID |
+| `events` | object | Complete event state map keyed by event ID |
+
+`vehicles` contains exactly these top-level keys: `air_1`, `air_2`, `surface_1`, `surface_2`, `sub_1`, and `sub_2`.
+
+`events` starts as an empty object and is populated by incoming `event` WebSocket messages.
+
+Status codes:
+
+| Status Code | Meaning |
+| --- | --- |
+| `200` | State returned successfully |
 
 This includes both vehicle state and event state:
 
