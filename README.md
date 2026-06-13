@@ -1,6 +1,6 @@
 # Maritime Multi-Domain DSS Backend
 
-FastAPI backend input layer for a Decision Support System, DSS, managing six external unmanned vehicles:
+FastAPI backend and React operator console for a Decision Support System, DSS, managing six external unmanned vehicles:
 
 - `air_1`, `air_2`
 - `surface_1`, `surface_2`
@@ -15,16 +15,23 @@ The DSS treats these vehicles as external entities. It does not simulate them in
 - Validates `vehicle_id`, `domain`, message shape, and heartbeat interval
 - Maintains in-memory `vehicles` and `events` maps
 - Derives link status from heartbeat age and subsurface blackout windows
+- Normalizes raw vehicle state into operator-facing state
+- Builds a frontend-ready operational map state
+- Detects DSS anomalies with deterministic Python rules
+- Aggregates recent severity over active events and anomalies
+- Generates one chat/report message only when severity threshold rules are met
 - Recalculates link status in the background even when no new message arrives
 - Exposes REST endpoints for health checks and state inspection
+- Provides a React/Leaflet operator console for map, fleet, events, severity, reports, and chat
 
 ## What This Backend Does Not Do
 
-- It does not include a frontend
 - It does not simulate drones
 - It does not persist state to a database
 - It does not provide command output APIs yet
 - It does not perform mission planning or autonomy decisions yet
+- It does not let the LLM create anomalies, mission facts, contacts, commands, or vehicle state
+- It does not generate command recommendations or vehicle control actions
 
 ## Project Structure
 
@@ -39,29 +46,101 @@ dss_backend/
   routers.py       # REST debug endpoints
   requirements.txt # Runtime dependencies
   test_client.py   # Small WebSocket client for local testing
+  core/
+    state_manager.py          # Normalizes raw vehicle/event state
+    map_builder.py            # Builds map-ready operational picture
+    anomaly_detector.py       # Deterministic DSS anomaly detection
+    severity_aggregator.py    # Rolling severity score and trigger state
+    report_trigger.py         # Cooldown and report deduplication
+    llm_report_builder.py     # llama.cpp chat/report client with fallback
+    chat_message_builder.py   # Operator chat message conversion
+    operator_state_builder.py # Final frontend-facing DSS state
+    processing_pipeline.py    # Orchestrates the middle layer
+dss_frontend/
+  index.html
+  package.json
+  src/
+    main.jsx                  # React app and Leaflet map
+    styles.css                # Black operator-console theme
 API.md             # Detailed API reference
 README.md          # Developer guide
 ```
 
 ## Run Locally
 
-Create and activate a virtual environment:
+Recommended local ports:
+
+| Service | Port | Notes |
+| --- | --- | --- |
+| Simulation | `8000` | External source of vehicle messages |
+| llama.cpp server | `8080` | Local GGUF Nemotron LLM server |
+| DSS backend | `8001` | FastAPI API and WebSocket |
+| DSS frontend | `5173` | React/Vite operator console |
+
+## Backend Environment
+
+Create and activate a backend virtual environment:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
+python --version
 ```
 
-Install dependencies:
+Install backend dependencies:
 
 ```bash
 pip install -r dss_backend/requirements.txt
 ```
 
+## llama.cpp LLM Server
+
+The DSS uses a separate local `llama-server` process for the GGUF Nemotron model:
+
+```text
+NikolayKozloff/Nemotron-Mini-4B-Instruct-Q8_0-GGUF
+nemotron-mini-4b-instruct-q8_0.gguf
+```
+
+Install `llama.cpp` first. If Homebrew is available:
+
+```bash
+brew install llama.cpp
+```
+
+Start the LLM server:
+
+```bash
+./run_llama_server.sh
+```
+
+This runs:
+
+```bash
+llama-server --hf-repo NikolayKozloff/Nemotron-Mini-4B-Instruct-Q8_0-GGUF --hf-file nemotron-mini-4b-instruct-q8_0.gguf -c 2048 --host 127.0.0.1 --port 8080
+```
+
+The first run downloads the GGUF file once, then uses the local cache.
+
+Useful environment variables:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `DSS_LLAMACPP_BASE_URL` | `http://127.0.0.1:8080` | URL used by backend to call llama-server |
+| `DSS_GGUF_HF_REPO` | `NikolayKozloff/Nemotron-Mini-4B-Instruct-Q8_0-GGUF` | GGUF Hugging Face repo for `run_llama_server.sh` |
+| `DSS_GGUF_HF_FILE` | `nemotron-mini-4b-instruct-q8_0.gguf` | GGUF file for `run_llama_server.sh` |
+| `DSS_LLAMA_CONTEXT` | `2048` | llama.cpp context size |
+| `DSS_LLAMA_PORT` | `8080` | llama-server port |
+| `DSS_LLM_REPORT_MAX_TOKENS` | `500` | Maximum generated report tokens |
+| `DSS_LLM_TEMPERATURE` | `0.1` | Low temperature to reduce report variability |
+| `DSS_LLM_TOP_P` | `0.9` | Top-p sampling setting |
+
+## Backend
+
 Run the API:
 
 ```bash
-uvicorn dss_backend.main:app --reload --port 8001
+./run_backend.sh
 ```
 
 The backend will be available at:
@@ -73,7 +152,7 @@ http://localhost:8001
 Port `8000` is often already used by other local services. This README uses `8001` for the DSS backend. If `8001` is also taken, choose another port:
 
 ```bash
-uvicorn dss_backend.main:app --reload --port 8010
+uvicorn dss_backend.main:app --port 8010
 ```
 
 When using a custom port, pass the matching WebSocket URL to the test client:
@@ -93,6 +172,49 @@ Run the sample WebSocket client in another terminal:
 ```bash
 python dss_backend/test_client.py
 ```
+
+## Frontend
+
+Install Node dependencies:
+
+```bash
+cd dss_frontend
+npm install
+```
+
+Run the React console:
+
+```bash
+npm run dev
+```
+
+Open:
+
+```text
+http://localhost:5173
+```
+
+The frontend reads the DSS backend from:
+
+```text
+http://localhost:8001
+```
+
+To point it at another backend URL, create `dss_frontend/.env`:
+
+```bash
+VITE_DSS_API_BASE_URL=http://localhost:8010
+```
+
+The frontend uses:
+
+- React
+- Vite
+- Leaflet via `react-leaflet`
+- Black operator-console theme with slightly rounded borders
+- Polling against `GET /dss/operator-state`
+- Real operator-to-LLM chat through `POST /dss/chat/send`
+- `POST /dss/chat/{message_id}/ack` for chat acknowledgement
 
 ## Allowed Vehicles
 
@@ -232,6 +354,62 @@ For every incoming WebSocket message, the backend performs this flow:
 7. Update vehicle state or event state
 8. Recalculate link status when relevant
 9. Send an acknowledgement back through the WebSocket
+10. Run the DSS middle-layer processing pipeline
+
+## Middle-Layer Processing Pipeline
+
+The middle layer runs after every valid WebSocket message and once per second in the background.
+
+Processing steps:
+
+1. Normalize raw vehicle and event state
+2. Build telemetry freshness fields
+3. Detect DSS anomalies with deterministic rules
+4. Merge active external events and active DSS anomalies
+5. Build operational map state
+6. Aggregate recent severity over a 120-second rolling window
+7. Check report trigger cooldown and deduplication
+8. Generate one LLM report only if the threshold is reached and the trigger allows it
+9. Fall back to a deterministic report if llama-server is unavailable
+10. Store report and corresponding chat message
+11. Build final `/dss/operator-state`
+
+Severity points:
+
+| Severity | Points |
+| --- | --- |
+| `low` | `1` |
+| `medium` | `3` |
+| `high` | `6` |
+| `critical` | `10` |
+
+Report trigger rules:
+
+| Rule | Result |
+| --- | --- |
+| Any active `critical` event/anomaly in the last 120 seconds | Generate report |
+| Severity score in the last 120 seconds is `>= 9` | Generate report |
+| Three or more `medium`, `high`, or `critical` events in the last 120 seconds | Generate report |
+
+Report spam protection:
+
+| Rule | Behavior |
+| --- | --- |
+| Report cooldown | At least 60 seconds between reports |
+| Cluster fingerprint deduplication | Same event/anomaly cluster is not reported repeatedly |
+
+Deterministic DSS anomaly kinds:
+
+| Event Kind | Event ID Pattern | Severity |
+| --- | --- | --- |
+| `low_battery` | `dss_low_battery_{vehicle_id}` | `high` |
+| `lost_link` | `dss_lost_link_{vehicle_id}` | `critical` |
+| `degraded_link` | `dss_degraded_link_{vehicle_id}` | `medium` or `high` |
+| `sensor_failure` | `dss_sensor_failure_{vehicle_id}_{sensor}` | `medium` or `high` |
+| `stale_telemetry` | `dss_stale_telemetry_{vehicle_id}` | `medium` |
+| `vehicle_fault` | `dss_vehicle_fault_{vehicle_id}` | `high` |
+
+The LLM never creates these anomaly objects. It only summarizes already-created events/anomalies.
 
 ## Common WebSocket Arguments
 
@@ -869,6 +1047,183 @@ Example response after an event:
 }
 ```
 
+## `GET /dss/events/{event_id}`
+
+Returns one external vehicle-reported event by ID.
+
+Endpoint arguments:
+
+| Argument Location | Argument | Type | Required | Meaning |
+| --- | --- | --- | --- | --- |
+| Path | `event_id` | string | Yes | Selects the external event to return |
+
+Status codes:
+
+| Status Code | Meaning |
+| --- | --- |
+| `200` | Event found |
+| `404` | Event ID was not found |
+
+## `GET /dss/map`
+
+Returns the latest frontend-ready operational map state.
+
+Response fields:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `vehicles` | array | Vehicle markers with position, heading, status, link status, battery, and display color |
+| `events` | array | External event and internal DSS anomaly markers that have positions |
+| `contacts` | array | Reserved for future contact tracks |
+| `zones` | array | Reserved for future operational zones |
+| `uncertainty_regions` | array | Circular uncertainty regions for lost link, late contact, blackout, or very stale telemetry |
+
+Example request:
+
+```bash
+curl http://localhost:8001/dss/map
+```
+
+## `GET /dss/dss-events`
+
+Returns deterministic DSS-generated anomalies.
+
+These are internal events created by Python logic, not by the WebSocket input and not by the LLM.
+
+Example request:
+
+```bash
+curl http://localhost:8001/dss/dss-events
+```
+
+## `GET /dss/severity`
+
+Returns the latest rolling severity aggregation state.
+
+Response fields:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `window_seconds` | integer | Rolling aggregation window, currently `120` |
+| `threshold_score` | integer | Score threshold that triggers a report, currently `9` |
+| `current_score` | integer | Current score from recent active events/anomalies |
+| `triggered` | boolean | Whether reporting criteria are currently met |
+| `trigger_reason` | string or null | Reason reporting criteria were met |
+| `event_count` | integer | Number of recent active events/anomalies in the window |
+| `medium_high_count` | integer | Number of medium/high/critical recent items |
+| `triggering_event_ids` | array | Event/anomaly IDs contributing to current severity state |
+| `updated_at` | datetime | Last aggregation time |
+
+Example request:
+
+```bash
+curl http://localhost:8001/dss/severity
+```
+
+## `GET /dss/reports`
+
+Returns generated DSS reports, newest first.
+
+Reports are generated only when severity rules trigger and report cooldown/deduplication allow a new report.
+
+Example request:
+
+```bash
+curl http://localhost:8001/dss/reports
+```
+
+## `GET /dss/reports/{report_id}`
+
+Returns one stored report.
+
+Endpoint arguments:
+
+| Argument Location | Argument | Type | Required | Meaning |
+| --- | --- | --- | --- | --- |
+| Path | `report_id` | string | Yes | Selects the report to return |
+
+Status codes:
+
+| Status Code | Meaning |
+| --- | --- |
+| `200` | Report found |
+| `404` | Report ID was not found |
+
+## `GET /dss/chat`
+
+Returns operator-facing chat messages, newest first.
+
+Optional query arguments:
+
+| Argument | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `limit` | integer | No | Maximum number of chat messages to return |
+
+Example request:
+
+```bash
+curl http://localhost:8001/dss/chat?limit=50
+```
+
+## `GET /dss/chat/{message_id}`
+
+Returns one chat message.
+
+Endpoint arguments:
+
+| Argument Location | Argument | Type | Required | Meaning |
+| --- | --- | --- | --- | --- |
+| Path | `message_id` | string | Yes | Selects the chat message to return |
+
+## `POST /dss/chat/{message_id}/ack`
+
+Marks a chat message as acknowledged by the operator.
+
+Endpoint arguments:
+
+| Argument Location | Argument | Type | Required | Meaning |
+| --- | --- | --- | --- | --- |
+| Path | `message_id` | string | Yes | Selects the chat message to acknowledge |
+
+Example request:
+
+```bash
+curl -X POST http://localhost:8001/dss/chat/chat_report_20260101T120501/ack
+```
+
+Example response:
+
+```json
+{
+  "ok": true,
+  "message_id": "chat_report_20260101T120501",
+  "acknowledged": true
+}
+```
+
+## `GET /dss/operator-state`
+
+Returns the final operator-facing DSS state for a future frontend.
+
+Top-level response fields:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `timestamp` | datetime | Time the operator state was built |
+| `system_status` | object | Counts and LLM/fallback status |
+| `map` | object | Operational map state |
+| `vehicles` | object | Normalized vehicle state |
+| `active_events` | array | Active external events and DSS anomalies |
+| `severity_state` | object | Current severity aggregation |
+| `reports` | array | Stored reports, newest first |
+| `chat_messages` | array | Chat messages, newest first |
+
+Example request:
+
+```bash
+curl http://localhost:8001/dss/operator-state
+```
+
 ## Local WebSocket Test Client
 
 The included client connects to:
@@ -880,7 +1235,18 @@ ws://localhost:8001/dss/ws/vehicles
 It sends:
 
 - one `heartbeat` message for `air_1`
-- one `telemetry` message for `air_1`
+- one low-battery `telemetry` message for `air_1`, with `percentage=18` and `bingo_threshold=20`
+- one `heartbeat` message for `surface_1`
+- one `telemetry` message for `surface_1`
+- one medium-severity `unknown_contact` event from `surface_1`
+
+Expected middle-layer result:
+
+- The DSS creates `dss_low_battery_air_1` with severity `high`, worth 6 points
+- The external event `evt_001` has severity `medium`, worth 3 points
+- Total recent severity becomes 9 points
+- The severity threshold is reached
+- One report and one chat message are generated, using fallback reporting if llama-server is unavailable
 
 Run it after starting the API:
 
@@ -893,12 +1259,18 @@ Expected output:
 ```json
 {"ok":true,"received_message_type":"heartbeat","vehicle_id":"air_1"}
 {"ok":true,"received_message_type":"telemetry","vehicle_id":"air_1"}
+{"ok":true,"received_message_type":"heartbeat","vehicle_id":"surface_1"}
+{"ok":true,"received_message_type":"telemetry","vehicle_id":"surface_1"}
+{"ok":true,"received_message_type":"event","vehicle_id":"surface_1"}
 ```
 
 Then inspect state:
 
 ```bash
-curl http://localhost:8001/dss/vehicles/air_1
+curl http://localhost:8001/dss/dss-events
+curl http://localhost:8001/dss/severity
+curl http://localhost:8001/dss/chat
+curl http://localhost:8001/dss/operator-state
 ```
 
 ## API Reference

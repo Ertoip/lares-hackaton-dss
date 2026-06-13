@@ -21,6 +21,40 @@ Vehicles are not modeled as an internal simulation. From the DSS perspective, th
 http://localhost:8001
 ```
 
+## Local Frontend
+
+The React operator console is in `dss_frontend/` and runs on Vite:
+
+```bash
+cd dss_frontend
+npm install
+npm run dev
+```
+
+Open:
+
+```text
+http://localhost:5173
+```
+
+The frontend polls:
+
+```http
+GET /dss/operator-state
+```
+
+It acknowledges chat reports with:
+
+```http
+POST /dss/chat/{message_id}/ack
+```
+
+Configure a different backend URL with `dss_frontend/.env`:
+
+```bash
+VITE_DSS_API_BASE_URL=http://localhost:8001
+```
+
 ## Allowed Vehicles
 
 | Vehicle ID | Domain |
@@ -350,11 +384,12 @@ Returns the full `events` map.
 
 ## Local Development
 
-Create a virtual environment:
+Create a backend virtual environment:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
+python --version
 ```
 
 Install dependencies:
@@ -363,10 +398,16 @@ Install dependencies:
 pip install -r dss_backend/requirements.txt
 ```
 
+Start the local GGUF LLM server in a separate terminal:
+
+```bash
+./run_llama_server.sh
+```
+
 Run the backend:
 
 ```bash
-uvicorn dss_backend.main:app --reload --port 8001
+./run_backend.sh
 ```
 
 Run the sample WebSocket client:
@@ -380,3 +421,199 @@ python dss_backend/test_client.py
 State is in memory only. Restarting the backend clears all vehicle and event state.
 
 This baseline intentionally does not include a frontend, simulation, command output APIs, persistence, authentication, or mission planning logic.
+
+## Middle-Layer Processing
+
+After every valid WebSocket message and once per second in the background, the DSS runs the middle-layer pipeline:
+
+```text
+raw socket state
+  -> normalized vehicles/events
+  -> operational map state
+  -> deterministic DSS anomaly detection
+  -> rolling severity aggregation
+  -> report trigger cooldown/deduplication
+  -> LLM or fallback report
+  -> chat message
+  -> operator state
+```
+
+The WebSocket input schemas do not change. The LLM never creates internal anomalies and never controls vehicles. Deterministic Python logic creates DSS anomalies; the LLM only summarizes already-existing active events/anomalies after the severity threshold is reached.
+
+Severity scoring:
+
+| Severity | Points |
+| --- | --- |
+| `low` | `1` |
+| `medium` | `3` |
+| `high` | `6` |
+| `critical` | `10` |
+
+Report generation triggers when any of these are true within the last 120 seconds:
+
+| Condition | Result |
+| --- | --- |
+| At least one critical event/anomaly | Report trigger |
+| Severity score is `>= 9` | Report trigger |
+| Three or more medium/high/critical items | Report trigger |
+
+Report generation has a 60-second cooldown and cluster deduplication.
+
+## Additional REST Endpoints
+
+### Event By ID
+
+```http
+GET /dss/events/{event_id}
+```
+
+Returns one external vehicle-reported event. Returns `404` if not found.
+
+### Map State
+
+```http
+GET /dss/map
+```
+
+Returns:
+
+```json
+{
+  "vehicles": [],
+  "events": [],
+  "contacts": [],
+  "zones": [],
+  "uncertainty_regions": []
+}
+```
+
+### DSS Events
+
+```http
+GET /dss/dss-events
+```
+
+Returns deterministic DSS-generated anomalies keyed by event ID.
+
+Example event IDs:
+
+```text
+dss_low_battery_air_1
+dss_lost_link_air_1
+dss_degraded_link_surface_1
+dss_sensor_failure_surface_1_sonar
+dss_stale_telemetry_sub_1
+dss_vehicle_fault_air_2
+```
+
+### Severity State
+
+```http
+GET /dss/severity
+```
+
+Returns:
+
+```json
+{
+  "window_seconds": 120,
+  "threshold_score": 9,
+  "current_score": 9,
+  "triggered": true,
+  "trigger_reason": "severity_threshold_reached",
+  "event_count": 2,
+  "medium_high_count": 2,
+  "triggering_event_ids": []
+}
+```
+
+### Reports
+
+```http
+GET /dss/reports
+GET /dss/reports/{report_id}
+```
+
+Reports are sorted newest first. `GET /dss/reports/{report_id}` returns `404` if not found.
+
+### Chat
+
+```http
+GET /dss/chat
+GET /dss/chat?limit=50
+POST /dss/chat/send
+GET /dss/chat/{message_id}
+POST /dss/chat/{message_id}/ack
+```
+
+`GET /dss/chat` returns chat messages newest first.
+
+`POST /dss/chat/send` sends an operator message to the local DSS LLM using the current operator state as context.
+
+Request:
+
+```json
+{
+  "message": "What is the current situation?"
+}
+```
+
+Response:
+
+```json
+{
+  "ok": true,
+  "user_message": {},
+  "assistant_message": {}
+}
+```
+
+The LLM may only answer from current DSS state. It must not invent vehicles, contacts, commands, or mission facts.
+
+Ack response:
+
+```json
+{
+  "ok": true,
+  "message_id": "chat_report_20260101T120501",
+  "acknowledged": true
+}
+```
+
+### Operator State
+
+```http
+GET /dss/operator-state
+```
+
+Returns the future-frontend-facing state:
+
+```json
+{
+  "timestamp": "...",
+  "system_status": {},
+  "map": {},
+  "vehicles": {},
+  "active_events": [],
+  "severity_state": {},
+  "reports": [],
+  "chat_messages": []
+}
+```
+
+## LLM Configuration
+
+The report builder talks to a local llama.cpp `llama-server`. It uses the GGUF model `NikolayKozloff/Nemotron-Mini-4B-Instruct-Q8_0-GGUF` by default.
+
+| Variable | Default |
+| --- | --- |
+| `DSS_LLAMACPP_BASE_URL` | `http://127.0.0.1:8080` |
+| `DSS_GGUF_HF_REPO` | `NikolayKozloff/Nemotron-Mini-4B-Instruct-Q8_0-GGUF` |
+| `DSS_GGUF_HF_FILE` | `nemotron-mini-4b-instruct-q8_0.gguf` |
+| `DSS_LLAMA_CONTEXT` | `2048` |
+| `DSS_LLAMA_PORT` | `8080` |
+| `DSS_LLM_REPORT_MAX_TOKENS` | `500` |
+| `DSS_LLM_TEMPERATURE` | `0.1` |
+| `DSS_LLM_TOP_P` | `0.9` |
+
+If llama-server is unavailable or generation fails, the DSS continues running and uses deterministic fallback reports.

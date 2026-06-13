@@ -16,6 +16,12 @@ ALLOWED_VEHICLES: dict[str, str] = {
 
 vehicles: dict[str, dict[str, Any]] = {vehicle_id: {} for vehicle_id in ALLOWED_VEHICLES}
 events: dict[str, dict[str, Any]] = {}
+dss_events: dict[str, dict[str, Any]] = {}
+severity_state: dict[str, Any] = {}
+reports: dict[str, dict[str, Any]] = {}
+chat_messages: dict[str, dict[str, Any]] = {}
+map_state: dict[str, Any] = {}
+operator_state: dict[str, Any] = {}
 state_lock = asyncio.Lock()
 
 
@@ -36,4 +42,10 @@ def serializable_snapshot() -> dict[str, Any]:
     return {
         "vehicles": deepcopy(vehicles),
         "events": deepcopy(events),
+        "dss_events": deepcopy(dss_events),
+        "severity_state": deepcopy(severity_state),
+        "reports": deepcopy(reports),
+        "chat_messages": deepcopy(chat_messages),
+        "map_state": deepcopy(map_state),
+        "operator_state": deepcopy(operator_state),
     }

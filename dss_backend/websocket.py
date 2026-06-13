@@ -4,6 +4,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.encoders import jsonable_encoder
 from pydantic import ValidationError
 
+from dss_backend.core.processing_pipeline import run_processing_pipeline
 from dss_backend.link_status import apply_link_status
 from dss_backend.models import (
     HeartbeatMessage,
@@ -39,10 +40,12 @@ async def _handle_heartbeat(message: HeartbeatMessage) -> None:
 
 
 async def _handle_telemetry(message: TelemetryMessage) -> None:
+    received_at = utc_now()
     vehicle = vehicles[message.vehicle_id]
     vehicle["vehicle_id"] = message.vehicle_id
     vehicle["domain"] = message.domain
     vehicle["telemetry"] = _dump_message(message)
+    vehicle["telemetry_received_at"] = received_at
     vehicle["status"] = message.status
     vehicle["position"] = message.position.model_dump(mode="python")
     vehicle["velocity"] = message.velocity.model_dump(mode="python")
@@ -53,7 +56,11 @@ async def _handle_telemetry(message: TelemetryMessage) -> None:
 
 
 async def _handle_event(message: VehicleEventMessage) -> None:
-    events[message.event_id] = _dump_message(message)
+    event = _dump_message(message)
+    event["received_at"] = utc_now()
+    event["status"] = "active"
+    event["created_by"] = "vehicle"
+    events[message.event_id] = event
 
 
 async def _handle_link_state(message: LinkStateMessage) -> None:
@@ -110,6 +117,8 @@ async def vehicles_websocket(websocket: WebSocket) -> None:
                         "vehicle_id": message.vehicle_id,
                     }
                 )
+                async with state_lock:
+                    run_processing_pipeline()
             except ValidationError as exc:
                 await websocket.send_json(
                     {
