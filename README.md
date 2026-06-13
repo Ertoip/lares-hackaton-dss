@@ -124,6 +124,21 @@ WS /dss/ws/vehicles
 
 This is the only vehicle input socket. All six vehicles send messages to this endpoint. The backend decides how to process the message using the `message_type` field.
 
+Connection arguments:
+
+| Argument Location | Argument | Type | Required | Meaning |
+| --- | --- | --- | --- | --- |
+| Path | None | N/A | No | This WebSocket endpoint has no path arguments |
+| Query | None | N/A | No | This WebSocket endpoint has no query arguments |
+| Headers | Standard WebSocket headers | HTTP headers | Yes, handled by client library | Used by the WebSocket protocol upgrade |
+| Message body | JSON object | object | Yes, per message | One direct vehicle message per WebSocket frame |
+
+Connection URL:
+
+```text
+ws://localhost:8000/dss/ws/vehicles
+```
+
 Supported `message_type` values:
 
 | Message Type | Purpose |
@@ -166,6 +181,32 @@ Validation errors include details from Pydantic:
 }
 ```
 
+Successful acknowledgement fields:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `ok` | boolean | `true` when the message was valid and processed |
+| `received_message_type` | string | The accepted incoming message type |
+| `vehicle_id` | string | Vehicle ID from the accepted message |
+
+Error acknowledgement fields:
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `ok` | boolean | Yes | `false` when the message was rejected |
+| `error` | string | Yes | Human-readable error reason |
+| `details` | array | Only for schema validation failures | Pydantic validation detail objects |
+
+Common `error` values:
+
+| Error | Meaning |
+| --- | --- |
+| `Invalid message_type` | Missing or unsupported `message_type` |
+| `Invalid vehicle_id` | `vehicle_id` is not one of the six allowed vehicles |
+| `Domain does not match vehicle_id` | `domain` does not match the configured vehicle domain |
+| `Message must be a JSON object` | Incoming WebSocket frame decoded as JSON but was not an object |
+| `Validation failed` | JSON object failed Pydantic model validation |
+
 ## Message Flow
 
 For every incoming WebSocket message, the backend performs this flow:
@@ -183,6 +224,8 @@ For every incoming WebSocket message, the backend performs this flow:
 ## Common WebSocket Arguments
 
 These arguments appear in every incoming vehicle message.
+
+Unknown extra arguments are rejected. The Pydantic models use strict schemas with `extra="forbid"`, so send only the documented fields for each message type.
 
 | Argument | Type | Required | Allowed Values or Validation | Meaning |
 | --- | --- | --- | --- | --- |
@@ -601,6 +644,63 @@ Use this endpoint when you want a full snapshot of what the DSS currently knows.
 
 Returns only the vehicle state map.
 
+Endpoint arguments:
+
+| Argument Location | Argument | Type | Required | Meaning |
+| --- | --- | --- | --- | --- |
+| Path | None | N/A | No | This endpoint has no path arguments |
+| Query | None | N/A | No | This endpoint has no query arguments |
+| Body | None | N/A | No | This endpoint does not accept a request body |
+
+Response fields:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `air_1` | object | Current DSS state for air drone 1 |
+| `air_2` | object | Current DSS state for air drone 2 |
+| `surface_1` | object | Current DSS state for surface drone 1 |
+| `surface_2` | object | Current DSS state for surface drone 2 |
+| `sub_1` | object | Current DSS state for subsurface drone 1 |
+| `sub_2` | object | Current DSS state for subsurface drone 2 |
+
+Common vehicle-state fields after messages arrive:
+
+| Field | Type | Present After | Meaning |
+| --- | --- | --- | --- |
+| `vehicle_id` | string | Any valid message for that vehicle | Vehicle identifier |
+| `domain` | string | Any valid message for that vehicle | Vehicle domain |
+| `last_heartbeat` | object | `heartbeat` | Full last heartbeat message |
+| `last_link_state` | object | `link_state` | Full last link-state message |
+| `telemetry` | object | `telemetry` | Full last telemetry message |
+| `status` | string | `telemetry` | Vehicle operating status |
+| `position` | object | `telemetry` | Last known vehicle position |
+| `velocity` | object | `telemetry` | Last known vehicle velocity |
+| `battery` | object | `telemetry` | Last known battery state |
+| `sensors` | object | `telemetry` | Last known sensor states |
+| `capabilities` | object | `telemetry` | Last known vehicle capabilities |
+| `current_task_id` | string or null | `telemetry` | Current task ID |
+| `link` | object | `heartbeat` or `link_state` | Derived and reported communication status |
+
+Common `link` fields:
+
+| Field | Type | Present After | Meaning |
+| --- | --- | --- | --- |
+| `status` | string | `heartbeat`, `link_state`, or background recalculation | DSS-derived link status |
+| `status_updated_at` | ISO 8601 datetime string | Link status calculation | Server time when link status was last recalculated |
+| `last_heartbeat_at` | ISO 8601 datetime string | `heartbeat` | Vehicle-provided heartbeat timestamp |
+| `last_heartbeat_received_at` | ISO 8601 datetime string | `heartbeat` | DSS receive time for the last heartbeat |
+| `communication_mode` | string | `heartbeat` or `link_state` | Communication mode such as `radio` or `acoustic` |
+| `expected_interval_ms` | integer | `heartbeat` | Expected heartbeat interval in milliseconds |
+| `reported_status` | string | `link_state` | Link status reported by the vehicle or external comms source |
+| `last_contact_at` | ISO 8601 datetime string or null | `link_state` | Last known contact time reported in link-state message |
+| `expected_next_contact_window` | object or null | `link_state` | Planned contact window for expected blackout cases |
+
+Status codes:
+
+| Status Code | Meaning |
+| --- | --- |
+| `200` | Vehicle map returned successfully |
+
 Example request:
 
 ```bash
@@ -641,6 +741,31 @@ Actual responses may include additional fields such as `last_heartbeat`, `teleme
 
 Returns the current state for one vehicle.
 
+Endpoint arguments:
+
+| Argument Location | Argument | Type | Required | Allowed Values | Meaning |
+| --- | --- | --- | --- | --- | --- |
+| Path | `vehicle_id` | string | Yes | `air_1`, `air_2`, `surface_1`, `surface_2`, `sub_1`, `sub_2` | Selects which vehicle state to return |
+| Query | None | N/A | No | N/A | This endpoint has no query arguments |
+| Body | None | N/A | No | N/A | This endpoint does not accept a request body |
+
+Response fields:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| Entire response | object | Vehicle state object for the selected vehicle |
+
+The object can be empty if the vehicle ID is valid but no messages have arrived yet.
+
+The possible vehicle-state fields are the same fields documented in `GET /dss/vehicles`.
+
+Status codes:
+
+| Status Code | Meaning |
+| --- | --- |
+| `200` | Vehicle exists and its state was returned |
+| `404` | `vehicle_id` is not one of the six allowed vehicles |
+
 Example request:
 
 ```bash
@@ -668,6 +793,29 @@ Valid vehicle IDs are always present in the vehicle map, even if their current s
 ## `GET /dss/events`
 
 Returns all stored events keyed by `event_id`.
+
+Endpoint arguments:
+
+| Argument Location | Argument | Type | Required | Meaning |
+| --- | --- | --- | --- | --- |
+| Path | None | N/A | No | This endpoint has no path arguments |
+| Query | None | N/A | No | This endpoint has no query arguments |
+| Body | None | N/A | No | This endpoint does not accept a request body |
+
+Response fields:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| Top-level keys | string | Event IDs such as `evt_001` |
+| Top-level values | object | Event records containing the fields from the incoming `event` message |
+
+Each event record contains the event arguments documented in the `Event Messages` section: `message_type`, `event_id`, `timestamp`, `vehicle_id`, `domain`, `event_kind`, `severity`, `position`, `description`, and `metadata`.
+
+Status codes:
+
+| Status Code | Meaning |
+| --- | --- |
+| `200` | Event map returned successfully |
 
 Example request:
 
