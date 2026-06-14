@@ -25,7 +25,7 @@ def _color_status(vehicle: dict[str, Any]) -> str:
         return "red"
     if battery_percentage is not None and bingo_threshold is not None:
         if battery_percentage <= bingo_threshold:
-            return "red"
+            return "low_battery"
     if link_status == "lost_link":
         return "red"
     if link_status == "unstable":

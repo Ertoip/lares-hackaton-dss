@@ -1,10 +1,15 @@
 import asyncio
+import json
+import logging
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 from dss_backend.core.llm_report_builder import get_report_builder
 from dss_backend.state import (
@@ -203,6 +208,68 @@ async def send_chat_message(request: ChatSendRequest) -> dict[str, object]:
     return {"ok": True, "user_message": user_message, "assistant_message": assistant_message}
 
 
+@router.post("/chat/stream")
+async def stream_chat_message(request: ChatSendRequest) -> StreamingResponse:
+    created_at = utc_now()
+    stamp = created_at.strftime("%Y%m%dT%H%M%S%f")
+    user_msg: dict[str, Any] = {
+        "message_id": f"chat_user_{stamp}",
+        "timestamp": created_at,
+        "sender": "operator",
+        "message_type": "operator_message",
+        "severity": "none",
+        "title": "Operator",
+        "body": request.message,
+        "linked_event_ids": [],
+        "linked_report_id": None,
+        "map_focus": {"type": "none", "ids": []},
+        "details": {},
+        "acknowledged": True,
+    }
+    async with state_lock:
+        chat_messages[user_msg["message_id"]] = user_msg
+        context = _chat_context_snapshot()
+
+    builder = get_report_builder()
+
+    async def generate():
+        full_text = ""
+        try:
+            async for chunk in builder.stream_chat_response(request.message, context):
+                full_text += chunk
+                yield f"data: {json.dumps({'text': chunk})}\n\n"
+        except Exception as exc:
+            logger.warning("DSS LLM stream error: %s", exc)
+            full_text = "The DSS LLM could not process this request."
+            yield f"data: {json.dumps({'text': full_text})}\n\n"
+
+        answered_at = utc_now()
+        assistant_msg: dict[str, Any] = {
+            "message_id": f"chat_llm_{answered_at.strftime('%Y%m%dT%H%M%S%f')}",
+            "timestamp": answered_at,
+            "sender": "dss",
+            "message_type": "llm_chat",
+            "severity": "none",
+            "title": "DSS",
+            "body": full_text,
+            "linked_event_ids": [],
+            "linked_report_id": None,
+            "map_focus": {"type": "none", "ids": []},
+            "details": {},
+            "acknowledged": True,
+        }
+        async with state_lock:
+            chat_messages[assistant_msg["message_id"]] = assistant_msg
+
+        yield f"data: {json.dumps({'done': True})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.get("/chat/{message_id}")
 async def get_chat_message(message_id: str) -> dict[str, object]:
     async with state_lock:
@@ -227,3 +294,169 @@ async def acknowledge_chat_message(message_id: str) -> dict[str, object]:
 async def get_operator_state() -> dict[str, object]:
     async with state_lock:
         return deepcopy(operator_state)
+
+
+@router.get("/terrain")
+async def check_terrain(lat: float, lon: float) -> dict[str, object]:
+    try:
+        from global_land_mask import globe  # noqa: PLC0415
+        is_land = bool(globe.is_land(lat, lon))
+    except Exception:
+        is_land = False  # permissive fallback if package not installed
+    return {"is_land": is_land, "lat": lat, "lon": lon}
+
+
+def _astar(
+    start_lat: float, start_lon: float,
+    end_lat: float, end_lon: float,
+    padding: float,
+    max_cells: int,
+    min_res: float,
+) -> list[dict[str, float]] | None:
+    """A* over a precomputed land grid. Returns smoothed path or None if unreachable."""
+    import heapq
+    import math
+    import numpy as np
+    from global_land_mask import globe  # noqa: PLC0415
+
+    min_lat = min(start_lat, end_lat) - padding
+    max_lat = max(start_lat, end_lat) + padding
+    min_lon = min(start_lon, end_lon) - padding
+    max_lon = max(start_lon, end_lon) + padding
+
+    bbox       = max(max_lat - min_lat, max_lon - min_lon)
+    resolution = max(min_res, bbox / max_cells)
+
+    lats  = np.arange(min_lat, max_lat + resolution * 0.5, resolution)
+    lons  = np.arange(min_lon, max_lon + resolution * 0.5, resolution)
+    n_lat, n_lon = len(lats), len(lons)
+
+    lat_g, lon_g = np.meshgrid(lats, lons, indexing="ij")
+    land = globe.is_land(lat_g.ravel(), lon_g.ravel()).reshape(n_lat, n_lon)
+
+    def to_cell(lat: float, lon: float) -> tuple[int, int]:
+        r = int(round((lat - min_lat) / resolution))
+        c = int(round((lon - min_lon) / resolution))
+        return max(0, min(r, n_lat - 1)), max(0, min(c, n_lon - 1))
+
+    start_cell = to_cell(start_lat, start_lon)
+    end_cell   = to_cell(end_lat,   end_lon)
+
+    DIRS  = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1)]
+    COSTS = [math.sqrt(2), 1, math.sqrt(2), 1, 1, math.sqrt(2), 1, math.sqrt(2)]
+
+    def h(a: tuple, b: tuple) -> float:
+        return math.hypot(a[0] - b[0], a[1] - b[1])
+
+    open_set: list = [(0.0, start_cell)]
+    came_from: dict = {}
+    g: dict = {start_cell: 0.0}
+
+    while open_set:
+        _, cur = heapq.heappop(open_set)
+        if cur == end_cell:
+            path: list[tuple[int, int]] = []
+            step = end_cell
+            while step in came_from:
+                path.append(step)
+                step = came_from[step]
+            path.append(start_cell)
+            path.reverse()
+
+            # Line-of-sight smoothing (string pulling via Bresenham)
+            def los(a: tuple, b: tuple) -> bool:
+                r0, c0 = a; r1, c1 = b
+                dr, dc = abs(r1 - r0), abs(c1 - c0)
+                sr = 1 if r0 < r1 else -1
+                sc = 1 if c0 < c1 else -1
+                err = dr - dc
+                r, c = r0, c0
+                while True:
+                    if (r, c) not in (start_cell, end_cell) and land[r, c]:
+                        return False
+                    if r == r1 and c == c1:
+                        return True
+                    e2 = 2 * err
+                    if e2 > -dc: err -= dc; r += sr
+                    if e2 <  dr: err += dr; c += sc
+
+            smooth: list[tuple[int, int]] = [path[0]]
+            i = 0
+            while i < len(path) - 1:
+                j = len(path) - 1
+                while j > i + 1 and not los(path[i], path[j]):
+                    j -= 1
+                smooth.append(path[j])
+                i = j
+
+            result: list[dict[str, float]] = [{"lat": start_lat, "lon": start_lon}]
+            for r, c in smooth[1:-1]:
+                result.append({"lat": float(lats[r]), "lon": float(lons[c])})
+            result.append({"lat": end_lat, "lon": end_lon})
+            return result
+
+        for (dr, dc), cost in zip(DIRS, COSTS):
+            nr, nc = cur[0] + dr, cur[1] + dc
+            if not (0 <= nr < n_lat and 0 <= nc < n_lon):
+                continue
+            if (nr, nc) not in (start_cell, end_cell) and land[nr, nc]:
+                continue
+            ng  = g[cur] + cost
+            nb  = (nr, nc)
+            if ng < g.get(nb, float("inf")):
+                came_from[nb] = cur
+                g[nb] = ng
+                heapq.heappush(open_set, (ng + h(nb, end_cell), nb))
+
+    return None  # no path found
+
+
+def _compute_maritime_route(
+    start_lat: float, start_lon: float,
+    end_lat: float, end_lon: float,
+) -> list[dict[str, float]]:
+    import math
+
+    fallback = [
+        {"lat": start_lat, "lon": start_lon},
+        {"lat": end_lat,   "lon": end_lon},
+    ]
+
+    try:
+        dist = math.hypot(end_lat - start_lat, end_lon - start_lon)
+
+        # Pass 1 — wide coverage so maritime chokepoints (e.g. Gibraltar) are
+        # always inside the search area even when far from the direct line.
+        # min_res=0.04° gives ~3 cells across the Strait of Gibraltar (14 km).
+        padding_1 = min(10.0, max(6.0, dist * 0.5))
+        result = _astar(start_lat, start_lon, end_lat, end_lon,
+                        padding=padding_1, max_cells=1000, min_res=0.04)
+        if result:
+            return result
+
+        # Pass 2 — fine resolution, tight corridor along the direct line.
+        # Catches narrow straits that happen to lie roughly on the direct path.
+        padding_2 = max(0.5, dist * 0.1)
+        result = _astar(start_lat, start_lon, end_lat, end_lon,
+                        padding=padding_2, max_cells=700, min_res=0.008)
+        if result:
+            return result
+
+        return fallback
+
+    except Exception as exc:
+        logger.warning("Maritime route computation failed: %s", exc)
+        return fallback
+
+
+@router.get("/maritime-route")
+async def maritime_route(
+    start_lat: float = Query(...),
+    start_lon: float = Query(...),
+    end_lat: float   = Query(...),
+    end_lon: float   = Query(...),
+) -> dict[str, object]:
+    waypoints = await asyncio.to_thread(
+        _compute_maritime_route, start_lat, start_lon, end_lat, end_lon
+    )
+    return {"waypoints": waypoints}

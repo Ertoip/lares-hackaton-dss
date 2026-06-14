@@ -4,4 +4,9 @@ pydantic==2.13.4
 uvicorn[standard]==0.49.0
 websockets==16.0
 
-CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python
+# LLM
+openai
+python-dotenv
+
+# Geospatial
+global-land-mask

@@ -3,6 +3,9 @@ import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -14,7 +17,8 @@ from dss_backend.state import state_lock
 from dss_backend.websocket import router as websocket_router
 
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.WARNING)
+logging.getLogger("dss_backend").setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
 

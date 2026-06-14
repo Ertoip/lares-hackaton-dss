@@ -1,0 +1,38 @@
+[
+  {
+    "id": "air_1",
+    "type": "air",
+    "label": "UAV-1",
+    "sensors": ["camera", "radar"]
+  },
+  {
+    "id": "air_2",
+    "type": "air",
+    "label": "UAV-2",
+    "sensors": ["camera", "radar"]
+  },
+  {
+    "id": "surface_1",
+    "type": "surface",
+    "label": "USV-1",
+    "sensors": ["radar", "sonar"]
+  },
+  {
+    "id": "surface_2",
+    "type": "surface",
+    "label": "USV-2",
+    "sensors": ["radar", "sonar"]
+  },
+  {
+    "id": "sub_1",
+    "type": "subsurface",
+    "label": "UUV-1",
+    "sensors": ["sonar", "hydrophone"]
+  },
+  {
+    "id": "sub_2",
+    "type": "subsurface",
+    "label": "UUV-2",
+    "sensors": ["sonar", "hydrophone"]
+  }
+]

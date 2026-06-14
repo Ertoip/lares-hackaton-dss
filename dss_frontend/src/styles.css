@@ -34,7 +34,7 @@ body {
 
 .app-shell {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-columns: 280px minmax(0, 1fr) 300px;
   height: 100vh;
   width: 100vw;
   background: var(--bg);
@@ -47,7 +47,6 @@ body {
   min-width: 0;
   height: 100vh;
   background: var(--bg);
-  border-right: 1px solid var(--border);
 }
 
 .map-canvas {
@@ -101,6 +100,12 @@ body {
 
 /* ── Markers ─────────────────────────────────────────────────────────── */
 
+.vehicle-arrow {
+  width: 18px;
+  height: 26px;
+  clip-path: polygon(50% 0%, 100% 100%, 50% 72%, 0% 100%);
+}
+
 .vehicle-marker,
 .event-marker {
   align-items: center;
@@ -131,12 +136,69 @@ body {
 
 /* ── Chat pane ───────────────────────────────────────────────────────── */
 
-.chat-pane {
+/* ── Sidebar shell ───────────────────────────────────────────────────── */
+
+.sidebar {
   display: grid;
-  grid-template-rows: 48px minmax(0, 1fr) auto;
+  grid-template-rows: 40px minmax(0, 1fr) 300px;
   height: 100vh;
   min-width: 0;
   background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+}
+
+.sidebar-tabs {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+  padding: 0 0.5rem;
+  gap: 0.25rem;
+}
+
+.tab-btn {
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--text-dim);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 0 0.75rem;
+  text-transform: uppercase;
+  transition: color 0.15s, border-color 0.15s;
+  margin-bottom: -1px;
+}
+
+.tab-btn:hover { color: var(--text); background: transparent; }
+
+.tab-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: transparent;
+}
+
+.sidebar-section {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.sidebar-section::-webkit-scrollbar { width: 4px; }
+.sidebar-section::-webkit-scrollbar-track { background: transparent; }
+.sidebar-section::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 2px; }
+
+/* ── Chat pane (right column) ────────────────────────────────────────── */
+
+.chat-pane {
+  display: grid;
+  grid-template-rows: 36px minmax(0, 1fr) auto;
+  height: 100vh;
+  min-width: 0;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
 }
 
 .chat-header {
@@ -166,10 +228,10 @@ body {
 .chat-stream {
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 0.9rem;
+  padding: 0.5rem 0.6rem;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0;
 }
 
 .chat-stream::-webkit-scrollbar { width: 4px; }
@@ -190,31 +252,32 @@ body {
 /* ── Chat messages ───────────────────────────────────────────────────── */
 
 .chat-message {
-  padding: 0.7rem 0.85rem;
-  border-radius: 4px;
+  padding: 0.45rem 0.5rem 0.45rem 0.7rem;
+  border-left: 2px solid transparent;
+  width: 100%;
 }
 
 .chat-message.operator {
   background: var(--accent-dim);
-  border: 1px solid rgba(56, 189, 248, 0.2);
-  align-self: flex-end;
-  width: 90%;
+  border-left-color: rgba(56, 189, 248, 0.4);
 }
 
 .chat-message.assistant {
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  align-self: flex-start;
-  width: 95%;
+  background: transparent;
 }
+
+.chat-message.sev-low      { border-left-color: #22c55e; }
+.chat-message.sev-medium   { border-left-color: var(--yellow); }
+.chat-message.sev-high     { border-left-color: var(--orange); }
+.chat-message.sev-critical { border-left-color: var(--red); }
 
 .message-meta {
   color: var(--text-dim);
   display: flex;
-  font-size: 0.68rem;
+  font-size: 0.62rem;
   justify-content: space-between;
   letter-spacing: 0.06em;
-  margin-bottom: 0.4rem;
+  margin-bottom: 0.2rem;
   text-transform: uppercase;
 }
 
@@ -230,9 +293,9 @@ body {
 
 .chat-message p {
   color: var(--text);
-  font-size: 0.85rem;
-  line-height: 1.5;
-  margin: 0 0 0.5rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  margin: 0;
 }
 
 .chat-message p:last-child { margin-bottom: 0; }
@@ -252,6 +315,20 @@ body {
   margin-top: 0.5rem;
 }
 
+.cursor {
+  display: inline-block;
+  width: 2px;
+  height: 0.9em;
+  background: var(--accent);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: blink 0.9s step-end infinite;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
 .unacked {
   color: var(--accent);
   display: inline-block;
@@ -267,8 +344,8 @@ body {
 .chat-input {
   border-top: 1px solid var(--border);
   display: grid;
-  gap: 0.5rem;
-  padding: 0.75rem;
+  gap: 0.35rem;
+  padding: 0.5rem;
   background: var(--bg-raised);
 }
 
@@ -278,10 +355,10 @@ body {
   border-radius: 3px;
   color: var(--text-hi);
   font: inherit;
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   line-height: 1.4;
   outline: none;
-  padding: 0.6rem 0.75rem;
+  padding: 0.4rem 0.5rem;
   resize: none;
   width: 100%;
   transition: border-color 0.15s;
@@ -334,6 +411,211 @@ code {
 
 /* ── Responsive ──────────────────────────────────────────────────────── */
 
+/* ── Missions sidebar (left) ─────────────────────────────────────────── */
+
+.missions-sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.missions-sidebar::-webkit-scrollbar { width: 4px; }
+.missions-sidebar::-webkit-scrollbar-track { background: transparent; }
+.missions-sidebar::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 2px; }
+
+/* ── Missions panel ──────────────────────────────────────────────────── */
+
+.missions-panel {
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-empty {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  margin: 0;
+  padding: 0.5rem 0;
+}
+
+.btn-xs {
+  background: transparent;
+  border: 1px solid var(--border-hi);
+  border-radius: 3px;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.2rem 0.5rem;
+  letter-spacing: 0.04em;
+  transition: background 0.15s;
+}
+.btn-xs:hover { background: var(--accent-dim); }
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border-hi);
+  border-radius: 3px;
+  color: var(--text-dim);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.3rem 0.6rem;
+}
+
+.new-mission-form {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.new-mission-form input {
+  background: var(--bg);
+  border: 1px solid var(--border-hi);
+  border-radius: 3px;
+  color: var(--text-hi);
+  flex: 1;
+  font: inherit;
+  font-size: 0.82rem;
+  outline: none;
+  padding: 0.3rem 0.5rem;
+}
+
+.new-mission-form input:focus { border-color: var(--accent); }
+
+.mission-card {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.55rem 0.65rem;
+}
+
+.mission-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.35rem;
+}
+
+.mission-name {
+  color: var(--text-hi);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.btn-delete {
+  background: transparent;
+  border: 0;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0;
+  transition: color 0.15s;
+}
+.btn-delete:hover { color: var(--red); background: transparent; }
+
+.mission-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.type-badge {
+  border-radius: 3px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 0.15rem 0.4rem;
+  text-transform: uppercase;
+}
+
+.type-badge.type-air        { background: rgba(56,189,248,0.15); color: #38bdf8; }
+.type-badge.type-surface    { background: rgba(34,197,94,0.15);  color: #22c55e; }
+.type-badge.type-subsurface { background: rgba(168,85,247,0.15); color: #a855f7; }
+
+.dim { color: var(--text-dim); font-size: 0.75rem; }
+
+/* ── Fleet rows ──────────────────────────────────────────────────────── */
+
+.drone-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.drone-row:last-child { border-bottom: 0; }
+
+.drone-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.type-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.type-dot.type-air        { background: #38bdf8; }
+.type-dot.type-surface    { background: #22c55e; }
+.type-dot.type-subsurface { background: #a855f7; }
+
+.drone-label {
+  display: block;
+  color: var(--text-hi);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.drone-sensors {
+  display: block;
+  color: var(--text-dim);
+  font-size: 0.68rem;
+}
+
+.mission-select {
+  background: var(--bg);
+  border: 1px solid var(--border-hi);
+  border-radius: 3px;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.75rem;
+  max-width: 110px;
+  outline: none;
+  padding: 0.25rem 0.4rem;
+  flex-shrink: 0;
+}
+
+.mission-select:focus { border-color: var(--accent); }
+
+/* ── Responsive ──────────────────────────────────────────────────────── */
+
 @media (max-width: 900px) {
   body { overflow: auto; }
 
@@ -350,4 +632,355 @@ code {
   }
 
   .chat-pane { height: 40vh; }
+}
+
+/* ── Left sidebar (Teams / Tracking) ─────────────────────────────────── */
+
+.left-sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  min-width: 0;
+}
+
+.left-sidebar .sidebar-tabs {
+  flex-shrink: 0;
+  display: flex;
+  align-items: stretch;
+  height: 38px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+  padding: 0 0.5rem;
+  gap: 0.25rem;
+}
+
+.left-sidebar-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.left-sidebar-content::-webkit-scrollbar { width: 4px; }
+.left-sidebar-content::-webkit-scrollbar-track { background: transparent; }
+.left-sidebar-content::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 2px; }
+
+/* ── Panel body (shared by Teams + Tracking) ─────────────────────────── */
+
+.panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+}
+
+/* ── Team cards ──────────────────────────────────────────────────────── */
+
+.team-card {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.55rem 0.65rem;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.team-card.drag-over {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.team-drag-hint {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  cursor: grab;
+  opacity: 0.5;
+}
+
+.team-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.4rem;
+}
+
+.team-name {
+  color: var(--text-hi);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.team-drones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  min-height: 24px;
+}
+
+.drop-hint {
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  font-style: italic;
+  align-self: center;
+}
+
+.team-drone-tag {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--tc, var(--border-hi));
+  border-radius: 3px;
+  padding: 0.15rem 0.35rem 0.15rem 0.3rem;
+  font-size: 0.72rem;
+  color: var(--tc, var(--text));
+}
+
+.tag-remove {
+  background: transparent;
+  border: 0;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0;
+  margin-left: 2px;
+}
+.tag-remove:hover { color: var(--red); background: transparent; }
+
+/* ── Fleet grid ──────────────────────────────────────────────────────── */
+
+.fleet-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.drone-card {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--dc, var(--border-hi));
+  border-radius: 4px;
+  padding: 0.45rem 0.6rem;
+  cursor: grab;
+  transition: border-color 0.12s, background 0.12s, opacity 0.12s;
+  user-select: none;
+}
+
+.drone-card:hover {
+  background: #131929;
+  border-color: var(--border-hi);
+  border-left-color: var(--dc, var(--accent));
+}
+
+.drone-card.assigned {
+  opacity: 0.55;
+}
+
+.drone-card:active { cursor: grabbing; }
+
+.drone-card-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+.drone-card-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 0.1rem;
+}
+
+.drone-label {
+  color: var(--text-hi);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.drone-sensors {
+  color: var(--text-dim);
+  font-size: 0.68rem;
+}
+
+.drone-team-badge {
+  color: var(--accent);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+/* ── Tracking cards ──────────────────────────────────────────────────── */
+
+.tracking-card {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.5rem 0.65rem;
+}
+
+.tracking-card.offline {
+  opacity: 0.45;
+}
+
+.tracking-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.tracking-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.tracking-label {
+  flex: 1;
+  color: var(--text-hi);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.tracking-status {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.tracking-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  padding-left: 1.75rem;
+}
+
+.tracking-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+}
+
+.td-key {
+  color: var(--text-dim);
+}
+
+.td-val {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Map drop-target feedback ─────────────────────────────────────────── */
+
+.map-pane.drop-target .leaflet-container {
+  outline: 2px solid rgba(56, 189, 248, 0.45);
+  outline-offset: -2px;
+}
+
+.map-pane.drop-target {
+  cursor: crosshair;
+}
+
+/* ── Mothership marker ────────────────────────────────────────────────── */
+
+.ms-wrap {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ms-ring {
+  position: absolute;
+  width: 48px;
+  height: 48px;
+  border: 1.5px solid rgba(56, 189, 248, 0.55);
+  border-radius: 50%;
+  animation: ms-pulse 2.8s ease-out infinite;
+}
+
+.ms-ring-2 {
+  animation-delay: 1.4s;
+}
+
+.ms-core {
+  width: 20px;
+  height: 20px;
+  background: rgba(56, 189, 248, 0.2);
+  border: 2px solid #38bdf8;
+  border-radius: 50%;
+  position: relative;
+  z-index: 1;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.6);
+}
+
+.ms-name {
+  position: absolute;
+  bottom: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: rgba(56, 189, 248, 0.9);
+  text-transform: uppercase;
+}
+
+@keyframes ms-pulse {
+  from { transform: scale(1); opacity: 0.65; }
+  to   { transform: scale(2.2); opacity: 0; }
+}
+
+/* ── Waypoint pin markers ─────────────────────────────────────────────── */
+
+.wp-pin {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(7, 9, 13, 0.88);
+  border: 1.5px solid var(--wc, #a8a29e);
+  border-radius: 4px;
+  padding: 3px 7px 3px 5px;
+  white-space: nowrap;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--wc, #a8a29e) 40%, transparent);
+  backdrop-filter: blur(4px);
+}
+
+.wp-sym {
+  color: var(--wc, #a8a29e);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.wp-lbl {
+  color: var(--wc, #a8a29e);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.wp-tail {
+  position: absolute;
+  bottom: -7px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left:  5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top:   7px solid var(--wc, #a8a29e);
 }
