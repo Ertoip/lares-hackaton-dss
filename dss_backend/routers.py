@@ -5,9 +5,12 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+
+from dss_backend.sim_bridge import SIM_BASE_URL
 
 logger = logging.getLogger(__name__)
 
@@ -460,3 +463,80 @@ async def maritime_route(
         _compute_maritime_route, start_lat, start_lon, end_lat, end_lon
     )
     return {"waypoints": waypoints}
+
+
+# ── Simulation proxy endpoints ─────────────────────────────────────────────────
+
+class SimAssignRequest(BaseModel):
+    vehicle_id: str
+    task: str
+    lat: float | None = None
+    lon: float | None = None
+
+
+# DSS vehicle_id → simulation vehicle_id
+_DSS_TO_SIM: dict[str, str] = {
+    "air_1":     "UAV-1",
+    "air_2":     "UAV-2",
+    "surface_1": "USV-1",
+    "surface_2": "USV-2",
+    "sub_1":     "UUV-1",
+    "sub_2":     "UUV-2",
+}
+
+
+class SimCommandRequest(BaseModel):
+    vehicle_id: str
+    action: str
+    params: dict[str, Any] = {}
+    command_id: str | None = None
+
+
+async def _sim_post(path: str, body: dict | None = None) -> dict[str, Any]:
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.post(f"{SIM_BASE_URL}{path}", json=body)
+            r.raise_for_status()
+            return r.json()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Sim unreachable: {exc}") from exc
+
+
+@router.post("/sim/command")
+async def sim_command(request: SimCommandRequest) -> dict[str, Any]:
+    sim_id = _DSS_TO_SIM.get(request.vehicle_id)
+    if sim_id is None:
+        raise HTTPException(status_code=400, detail=f"Unknown vehicle_id: {request.vehicle_id}")
+    payload = {
+        "command_id": request.command_id or f"cmd_{utc_now().strftime('%H%M%S%f')}",
+        "vehicle_id": sim_id,
+        "action": request.action,
+        "params": request.params,
+        "issued_by": "dss",
+    }
+    return await _sim_post("/command", payload)
+
+
+@router.post("/sim/assign")
+async def sim_assign(request: SimAssignRequest) -> dict[str, Any]:
+    return await _sim_post("/assign", request.model_dump(exclude_none=True))
+
+
+@router.post("/sim/inject/{event_type}")
+async def sim_inject(event_type: str) -> dict[str, Any]:
+    return await _sim_post(f"/inject/{event_type}")
+
+
+@router.post("/sim/scenario/{name}")
+async def sim_scenario(name: str) -> dict[str, Any]:
+    return await _sim_post(f"/scenario/{name}")
+
+
+@router.post("/sim/fast_forward/{seconds}")
+async def sim_fast_forward(seconds: int) -> dict[str, Any]:
+    return await _sim_post(f"/fast_forward/{seconds}")
+
+
+@router.post("/sim/skip_to_next_event")
+async def sim_skip_to_next_event() -> dict[str, Any]:
+    return await _sim_post("/skip_to_next_event")

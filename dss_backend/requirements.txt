@@ -10,3 +10,6 @@ python-dotenv
 
 # Geospatial
 global-land-mask
+
+# Async HTTP (simulation bridge)
+httpx

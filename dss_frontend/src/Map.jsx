@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Circle, MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
+import { Circle, MapContainer, Marker, Polygon, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -31,9 +31,10 @@ const severityColors = {
   critical: '#ef4444',
 };
 
-const WP_COLOR = { checking: '#eab308', valid: '#22c55e', invalid: '#ef4444' };
+const WP_COLOR    = { checking: '#eab308', valid: '#22c55e', invalid: '#ef4444' };
+const TYPE_COLOR  = { air: '#38bdf8', surface: '#22c55e', subsurface: '#a855f7' };
 
-// ── Map ref capture (exposes Leaflet map instance to parent) ──────────────────
+// ── Map ref capture ───────────────────────────────────────────────────────────
 
 function MapRefCapture({ mapRef }) {
   const map = useMap();
@@ -41,10 +42,27 @@ function MapRefCapture({ mapRef }) {
   return null;
 }
 
+// ── Uncertainty ellipse ───────────────────────────────────────────────────────
+
+function makeEllipsePositions(lat, lon, semiAlong, semiCross, headingDeg, n = 36) {
+  const mPerDegLat = 111320;
+  const mPerDegLon = 111320 * Math.cos(lat * Math.PI / 180);
+  // heading 0=N CW → math angle 0=E CCW → theta = -heading
+  const theta = -(headingDeg ?? 0) * Math.PI / 180;
+  return Array.from({ length: n + 1 }, (_, i) => {
+    const t = (i / n) * 2 * Math.PI;
+    const lx = semiCross * Math.cos(t);
+    const ly = semiAlong * Math.sin(t);
+    const eM = lx * Math.cos(theta) - ly * Math.sin(theta);
+    const nM = lx * Math.sin(theta) + ly * Math.cos(theta);
+    return [lat + nM / mPerDegLat, lon + eM / mPerDegLon];
+  });
+}
+
 // ── Waypoint & mothership icons ───────────────────────────────────────────────
 
-function makeWaypointIcon(status, label) {
-  const color  = WP_COLOR[status] || '#a8a29e';
+function makeWaypointIcon(status, label, color) {
+  color = color || WP_COLOR[status] || '#a8a29e';
   const symbol = status === 'invalid'  ? '✕'
                : status === 'checking' ? '…'
                : '◎';
@@ -76,18 +94,31 @@ const MOTHERSHIP_ICON = L.divIcon({
 
 // ── Waypoint layer ────────────────────────────────────────────────────────────
 
-function WaypointLayer({ waypoints, onClear, mothershipPos }) {
+const MODES = [
+  { id: 'waypoint', label: 'WPT',    icon: '◎' },
+  { id: 'patrol',   label: 'Patrol', icon: '↻' },
+  { id: 'recon',    label: 'Recon',  icon: '⊞' },
+  { id: 'protect',  label: 'Escort', icon: '⬡' },
+];
+
+const MODE_LABEL = { waypoint: 'Waypoint', patrol: 'Patrol orbit', recon: 'Recon sweep', protect: 'Escort / protect' };
+
+function WaypointLayer({ waypoints, onClear, mothershipPos, vehiclePositions }) {
   const entries = Object.entries(waypoints);
 
   return (
     <>
       {entries.flatMap(([droneId, wp]) => {
         const wpPos = [wp.lat, wp.lon];
-        const color = WP_COLOR[wp.status] || '#a8a29e';
+        const color = TYPE_COLOR[wp.type] || WP_COLOR[wp.status] || '#a8a29e';
+
+        // Start the route from the drone's live position (fallback: mothership)
+        const dronePos = vehiclePositions?.[droneId];
+        const startPos = dronePos || mothershipPos;
 
         const routePositions = wp.route
-          ? wp.route.map(p => [p.lat, p.lon])
-          : [mothershipPos, wpPos];
+          ? [startPos, ...wp.route.slice(1).map(p => [p.lat, p.lon])]
+          : [startPos, wpPos];
 
         return [
           <Polyline
@@ -95,19 +126,43 @@ function WaypointLayer({ waypoints, onClear, mothershipPos }) {
             positions={routePositions}
             pathOptions={{ color, weight: 1.8, dashArray: '8 5', opacity: 0.85 }}
           />,
+
+          wp.mode === 'patrol' && (
+            <Circle
+              key={`zone-${droneId}`}
+              center={wpPos}
+              radius={5500}
+              pathOptions={{ color, weight: 1, dashArray: '7 4', fillOpacity: 0 }}
+            />
+          ),
+
+          wp.mode === 'protect' && (
+            <Circle
+              key={`zone-${droneId}`}
+              center={wpPos}
+              radius={2400}
+              pathOptions={{ color, weight: 1.5, fillColor: color, fillOpacity: 0.07 }}
+            />
+          ),
+
+          wp.pattern && (
+            <Polyline
+              key={`pattern-${droneId}`}
+              positions={wp.pattern.map(p => [p.lat, p.lon])}
+              pathOptions={{ color, weight: 1.4, dashArray: wp.mode === 'recon' ? '5 3' : null, opacity: 0.75 }}
+            />
+          ),
+
           <Marker
             key={`wp-${droneId}`}
             position={wpPos}
-            icon={makeWaypointIcon(wp.status, wp.label ?? droneId)}
+            icon={makeWaypointIcon(wp.status, wp.label ?? droneId, color)}
           >
             <Popup>
               <strong>{wp.label ?? droneId}</strong><br />
-              {wp.status === 'invalid'
-                ? <span style={{ color: '#ef4444' }}>Blocked — {wp.reason}</span>
-                : wp.status === 'checking'
-                ? <span style={{ color: '#eab308' }}>Checking terrain…</span>
-                : <span style={{ color: '#22c55e' }}>Waypoint assigned</span>}
-              <br />
+              <span style={{ color, textTransform: 'uppercase', fontSize: '0.7rem', fontWeight: 700 }}>
+                {MODE_LABEL[wp.mode] || 'Waypoint'}
+              </span><br />
               {wp.lat.toFixed(5)}, {wp.lon.toFixed(5)}
               <br />
               <button
@@ -124,6 +179,25 @@ function WaypointLayer({ waypoints, onClear, mothershipPos }) {
   );
 }
 
+// ── Mission mode toolbar ──────────────────────────────────────────────────────
+
+function ModeToolbar({ mode, onChange }) {
+  return (
+    <div className="mode-toolbar">
+      {MODES.map(m => (
+        <button
+          key={m.id}
+          className={`mode-btn${mode === m.id ? ' active' : ''}`}
+          onClick={() => onChange(m.id)}
+        >
+          <span className="mode-icon">{m.icon}</span>
+          <span className="mode-label">{m.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ── Vehicle / event icons ─────────────────────────────────────────────────────
 
 function vehicleArrowIcon(color, headingDeg) {
@@ -134,6 +208,27 @@ function vehicleArrowIcon(color, headingDeg) {
     iconSize:    [18, 26],
     iconAnchor:  [9, 13],
     popupAnchor: [0, -13],
+  });
+}
+
+function contactMarkerIcon(behavior) {
+  const hostile = (behavior || '').toLowerCase() === 'hostile';
+  return L.divIcon({
+    className: '',
+    html: `<div class="contact-marker${hostile ? ' hostile' : ''}">⬥</div>`,
+    iconSize:    [22, 22],
+    iconAnchor:  [11, 11],
+    popupAnchor: [0, -14],
+  });
+}
+
+function aisVesselIcon(headingDeg) {
+  return L.divIcon({
+    className: '',
+    html: `<div style="transform:rotate(${headingDeg ?? 0}deg);width:14px;height:20px"><div class="vehicle-arrow" style="background:#78716c;opacity:0.7"></div></div>`,
+    iconSize:    [14, 20],
+    iconAnchor:  [7, 10],
+    popupAnchor: [0, -12],
   });
 }
 
@@ -149,14 +244,19 @@ function eventMarkerIcon(color) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function OperationalMap({ mapState, waypoints = {}, mothershipPos, onDropToMap, onClearWaypoint, onMothershipMove }) {
-  const mapRef    = useRef(null);
-  const paneRef   = useRef(null);
+export default function OperationalMap({
+  mapState, waypoints = {}, mothershipPos, missionMode,
+  onDropToMap, onClearWaypoint, onMothershipMove, onMissionModeChange,
+}) {
+  const mapRef  = useRef(null);
+  const paneRef = useRef(null);
   const [isDragOver, setIsDragOver] = useState(false);
 
-  const vehicles = mapState?.vehicles || [];
-  const events   = mapState?.events   || [];
-  const regions  = mapState?.uncertainty_regions || [];
+  const vehicles  = mapState?.vehicles   || [];
+  const events    = mapState?.events     || [];
+  const regions   = mapState?.uncertainty_regions || [];
+  const contacts  = mapState?.contacts   || [];
+  const aisVessels = mapState?.ais       || [];
 
   function handleDragOver(e) {
     e.preventDefault();
@@ -193,6 +293,8 @@ export default function OperationalMap({ mapState, waypoints = {}, mothershipPos
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+      <ModeToolbar mode={missionMode} onChange={onMissionModeChange} />
+
       <MapContainer
         center={mothershipPos}
         zoom={6}
@@ -207,7 +309,14 @@ export default function OperationalMap({ mapState, waypoints = {}, mothershipPos
         />
 
         <MapRefCapture mapRef={mapRef} />
-        <WaypointLayer waypoints={waypoints} onClear={onClearWaypoint} mothershipPos={mothershipPos} />
+        <WaypointLayer
+          waypoints={waypoints}
+          onClear={onClearWaypoint}
+          mothershipPos={mothershipPos}
+          vehiclePositions={Object.fromEntries(
+            vehicles.filter(v => v.position).map(v => [v.id, [v.position.lat, v.position.lon]])
+          )}
+        />
 
         {/* Mothership — draggable */}
         <Marker
@@ -228,39 +337,106 @@ export default function OperationalMap({ mapState, waypoints = {}, mothershipPos
           </Popup>
         </Marker>
 
-        {regions.map(region => (
-          <Circle
-            key={region.id}
-            center={[region.center.lat, region.center.lon]}
-            radius={region.radius_m || 100}
-            pathOptions={{ color: '#a8a29e', fillColor: '#78716c', fillOpacity: 0.16, weight: 1 }}
-          >
-            <Popup>
-              <strong>{region.vehicle_id}</strong><br />
-              {region.reason}<br />
-              Radius: {region.radius_m || 100} m
-            </Popup>
-          </Circle>
-        ))}
-
-        {vehicles.map(vehicle => {
-          const color = statusColors[vehicle.display?.color_status] || linkColors[vehicle.link_status] || '#a8a29e';
+        {/* Uncertainty ellipses */}
+        {regions.map(region => {
+          const hasEllipse = region.sigma_along_m && region.sigma_cross_m;
+          if (hasEllipse) {
+            const positions = makeEllipsePositions(
+              region.center.lat, region.center.lon,
+              region.sigma_along_m, region.sigma_cross_m,
+              region.uncertainty_heading_deg,
+            );
+            return (
+              <Polygon
+                key={region.id}
+                positions={positions}
+                pathOptions={{ color: '#eab308', fillColor: '#eab308', fillOpacity: 0.05, weight: 1.2, dashArray: '6 4' }}
+              >
+                <Popup>
+                  <strong>{region.vehicle_id}</strong><br />
+                  {region.reason}<br />
+                  ±{Math.round(region.sigma_along_m)}m × ±{Math.round(region.sigma_cross_m)}m
+                </Popup>
+              </Polygon>
+            );
+          }
           return (
-            <Marker
-              key={vehicle.id}
-              position={[vehicle.position.lat, vehicle.position.lon]}
-              icon={vehicleArrowIcon(color, vehicle.heading_deg)}
+            <Circle
+              key={region.id}
+              center={[region.center.lat, region.center.lon]}
+              radius={region.radius_m || 100}
+              pathOptions={{ color: '#eab308', fillColor: '#eab308', fillOpacity: 0.05, weight: 1.2, dashArray: '6 4' }}
             >
               <Popup>
-                <strong>{vehicle.id}</strong><br />
-                {vehicle.domain}<br />
-                Link: {vehicle.link_status || 'unknown'}<br />
-                Battery: {vehicle.battery_percentage ?? 'n/a'}%
+                <strong>{region.vehicle_id}</strong><br />
+                {region.reason}<br />
+                Radius: {region.radius_m || 100} m
               </Popup>
-            </Marker>
+            </Circle>
           );
         })}
 
+        {/* Vehicles */}
+        {vehicles.map(vehicle => {
+          const color = statusColors[vehicle.display?.color_status] || linkColors[vehicle.link_status] || '#a8a29e';
+          return (
+            <React.Fragment key={vehicle.id}>
+              <Marker
+                position={[vehicle.position.lat, vehicle.position.lon]}
+                icon={vehicleArrowIcon(color, vehicle.heading_deg)}
+              >
+                <Popup>
+                  <strong>{vehicle.id}</strong><br />
+                  {vehicle.domain} · {vehicle.status}<br />
+                  Link: {vehicle.link_status || 'unknown'}<br />
+                  Battery: {vehicle.battery_percentage ?? 'n/a'}%<br />
+                  {vehicle.age_sec > 0 && <span>No fix: {Math.round(vehicle.age_sec)}s</span>}
+                  {vehicle.rtb && <><br /><span style={{ color: '#f97316' }}>RTB in progress</span></>}
+                  {vehicle.submerged && <><br /><span style={{ color: '#a855f7' }}>SUBMERGED</span></>}
+                </Popup>
+              </Marker>
+              {/* RTB dashed line to mothership */}
+              {vehicle.rtb && (
+                <Polyline
+                  positions={[[vehicle.position.lat, vehicle.position.lon], mothershipPos]}
+                  pathOptions={{ color: '#f97316', weight: 1, dashArray: '6 4', opacity: 0.7 }}
+                />
+              )}
+            </React.Fragment>
+          );
+        })}
+
+        {/* Threat contacts */}
+        {contacts.map(contact => (
+          <Marker
+            key={contact.id}
+            position={[contact.position.lat, contact.position.lon]}
+            icon={contactMarkerIcon(contact.behavior)}
+          >
+            <Popup>
+              <strong>{contact.id}</strong><br />
+              Behavior: <span style={{ color: '#ef4444', textTransform: 'uppercase', fontWeight: 700 }}>{contact.behavior}</span><br />
+              Speed: {contact.speed_knots?.toFixed(1)} kn · Hdg: {Math.round(contact.heading)}°<br />
+              {!contact.ais && <span style={{ color: '#f97316' }}>AIS dark — no transponder</span>}
+            </Popup>
+          </Marker>
+        ))}
+
+        {/* AIS vessel traffic */}
+        {aisVessels.map((vessel, i) => (
+          <Marker
+            key={vessel.mmsi || i}
+            position={[vessel.position.lat, vessel.position.lon]}
+            icon={aisVesselIcon(vessel.heading)}
+          >
+            <Popup>
+              <strong>{vessel.name || vessel.mmsi}</strong><br />
+              SOG: {vessel.sog_knots?.toFixed(1)} kn · Hdg: {Math.round(vessel.heading)}°
+            </Popup>
+          </Marker>
+        ))}
+
+        {/* DSS events */}
         {events.map(event => (
           <Marker
             key={event.id}

@@ -22,6 +22,7 @@ reports: dict[str, dict[str, Any]] = {}
 chat_messages: dict[str, dict[str, Any]] = {}
 map_state: dict[str, Any] = {}
 operator_state: dict[str, Any] = {}
+sim_raw: dict[str, Any] = {}  # latest full snapshot from simulation WS
 state_lock = asyncio.Lock()
 
 

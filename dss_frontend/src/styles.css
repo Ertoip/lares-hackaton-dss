@@ -640,6 +640,7 @@ code {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  overflow: hidden;
   background: var(--bg-panel);
   border-right: 1px solid var(--border);
   min-width: 0;
@@ -660,6 +661,7 @@ code {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+  min-height: 0;
 }
 
 .left-sidebar-content::-webkit-scrollbar { width: 4px; }
@@ -984,3 +986,209 @@ code {
   border-right: 5px solid transparent;
   border-top:   7px solid var(--wc, #a8a29e);
 }
+
+/* ── Mission mode toolbar ─────────────────────────────────────────────── */
+
+.mode-toolbar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  gap: 2px;
+  background: rgba(11, 14, 20, 0.88);
+  border: 1px solid var(--border-hi);
+  border-radius: 8px;
+  padding: 4px;
+  backdrop-filter: blur(12px);
+  pointer-events: all;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+}
+
+.mode-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 7px 16px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--text-dim);
+  cursor: pointer;
+  font: inherit;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+}
+
+.mode-btn:hover {
+  color: var(--text);
+  background: rgba(255,255,255,0.05);
+}
+
+.mode-btn.active {
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-color: rgba(56, 189, 248, 0.28);
+}
+
+.mode-icon {
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+.mode-label {
+  font-size: 0.56rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* ── Tracking action buttons ─────────────────────────────────────────────── */
+
+.tracking-actions {
+  display: flex;
+  gap: 6px;
+  padding: 6px 0 2px;
+  flex-wrap: wrap;
+}
+
+.tracking-cmd-btn {
+  flex: 1;
+  padding: 4px 8px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border-radius: 4px;
+  border: 1px solid var(--border-hi);
+  cursor: pointer;
+  background: rgba(255,255,255,0.06);
+  color: var(--text);
+  transition: background 0.12s, color 0.12s;
+}
+.tracking-cmd-btn:hover    { background: rgba(255,255,255,0.12); color: var(--text-hi); }
+.tracking-cmd-btn:disabled { opacity: 0.45; cursor: default; }
+.tracking-cmd-btn.rtb      { border-color: rgba(249,115,22,0.5); color: #fdba74; }
+.tracking-cmd-btn.rtb:hover { background: rgba(249,115,22,0.15); }
+
+.tracking-rtb-badge {
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #f97316;
+  animation: contact-pulse 1.4s ease-in-out infinite;
+}
+
+/* ── Contact marker ──────────────────────────────────────────────────────── */
+
+.contact-marker {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  color: #f97316;
+  text-shadow: 0 0 6px #f97316;
+  animation: contact-pulse 1.6s ease-in-out infinite;
+}
+.contact-marker.hostile {
+  color: #ef4444;
+  text-shadow: 0 0 8px #ef4444;
+  animation: contact-pulse 0.9s ease-in-out infinite;
+}
+
+@keyframes contact-pulse {
+  0%, 100% { opacity: 1;   transform: scale(1); }
+  50%       { opacity: 0.5; transform: scale(1.2); }
+}
+
+/* ── Alerts panel ────────────────────────────────────────────────────────── */
+
+.alerts-empty {
+  padding: 20px 16px;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+.alerts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 10px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.alert-row {
+  border-left: 3px solid var(--border);
+  padding: 6px 8px;
+  background: var(--bg-raised);
+  border-radius: 0 4px 4px 0;
+}
+
+.alert-type {
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.alert-vehicle {
+  font-size: 0.68rem;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.alert-msg {
+  margin: 3px 0 0;
+  font-size: 0.72rem;
+  color: var(--text);
+  line-height: 1.35;
+}
+
+.alert-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  margin-left: 4px;
+  background: #ef4444;
+  border-radius: 8px;
+  font-size: 0.6rem;
+  font-weight: 800;
+  color: #fff;
+  line-height: 1;
+}
+
+/* ── Weather strip ───────────────────────────────────────────────────────── */
+
+.weather-strip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel);
+  font-size: 0.65rem;
+  flex-shrink: 0;
+  flex-grow: 0;
+  flex-wrap: wrap;
+}
+
+.weather-label {
+  font-weight: 800;
+  color: #38bdf8;
+  letter-spacing: 0.06em;
+}
+
+.weather-val {
+  color: var(--text);
+}
+
+.weather-sep {
+  color: var(--text-dim);
+}
+

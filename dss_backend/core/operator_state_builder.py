@@ -1,6 +1,9 @@
 from datetime import datetime, timezone
 from typing import Any
 
+from dss_backend.core.triage_engine import score_events
+from dss_backend.state import sim_raw
+
 
 def _sort_newest(items: list[dict[str, Any]], time_field: str) -> list[dict[str, Any]]:
     def sort_value(item: dict[str, Any]) -> datetime:
@@ -22,8 +25,9 @@ def build_operator_state(
     now: datetime,
     llm_enabled: bool,
 ) -> dict[str, Any]:
-    chat_list = _sort_newest(list(current_chat_messages.values()), "timestamp")[:100]
+    chat_list   = _sort_newest(list(current_chat_messages.values()), "timestamp")[:100]
     report_list = _sort_newest(list(current_reports.values()), "created_at")
+    triage_list = score_events(active_events, now)
     return {
         "timestamp": now,
         "system_status": {
@@ -42,4 +46,10 @@ def build_operator_state(
         "severity_state": current_severity_state,
         "reports": report_list,
         "chat_messages": chat_list,
+        "triage": triage_list,
+        # Pass-through from simulation WebSocket snapshot
+        "mothership": sim_raw.get("mothership"),
+        "alerts": sim_raw.get("alerts", []),
+        "weather": sim_raw.get("weather"),
+        "sim_time_sec": sim_raw.get("sim_time_sec"),
     }

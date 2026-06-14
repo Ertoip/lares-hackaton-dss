@@ -13,6 +13,7 @@ from dss_backend.core.llm_report_builder import initialize_report_builder
 from dss_backend.core.processing_pipeline import run_processing_pipeline
 from dss_backend.link_status import LINK_RECALCULATION_SECONDS, recalculate_all_link_statuses
 from dss_backend.routers import router as rest_router
+from dss_backend.sim_bridge import poll_simulation
 from dss_backend.state import state_lock
 from dss_backend.websocket import router as websocket_router
 
@@ -34,15 +35,18 @@ async def dss_background_task() -> None:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     report_builder = initialize_report_builder()
     logger.info("DSS LLM enabled: %s", report_builder.enabled)
-    task = asyncio.create_task(dss_background_task())
+    task     = asyncio.create_task(dss_background_task())
+    sim_task = asyncio.create_task(poll_simulation())
     try:
         yield
     finally:
         task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        sim_task.cancel()
+        for t in (task, sim_task):
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
 
 
 app = FastAPI(
